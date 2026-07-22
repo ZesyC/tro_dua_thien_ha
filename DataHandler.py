@@ -78,7 +78,7 @@ class DataHandler:
 		if args.data == 'tiktok':
 			self.audio_feats, args.audio_feat_dim = self.loadFeatures(self.audiofile)
 
-		self.diffusionData = DiffusionData(torch.FloatTensor(self.trnMat.A))
+		self.diffusionData = DiffusionData(torch.FloatTensor(self.trnMat.toarray()))
 		self.diffusionLoader = dataloader.DataLoader(self.diffusionData, batch_size=args.batch, shuffle=True, num_workers=0)
 
 class TrnData(data.Dataset):
