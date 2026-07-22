@@ -107,7 +107,8 @@ class ConsistencyDiffusion(nn.Module):
 
 	def __init__(self, sigma_min=0.002, sigma_max=1.0, rho=7.0,
 				 N_min=10, N_max=80, total_training_steps=1000,
-				 loss_type='pseudo_huber'):
+				 loss_type='pseudo_huber', inference_steps=1,
+				 inference_sigma=-1):
 		super(ConsistencyDiffusion, self).__init__()
 		self.sigma_min = sigma_min
 		self.sigma_max = sigma_max
@@ -117,6 +118,9 @@ class ConsistencyDiffusion(nn.Module):
 		self.total_training_steps = max(total_training_steps, 1)
 		self.loss_type = loss_type
 		self.current_step = 0
+		self.inference_steps = max(inference_steps, 1)
+		# Nếu -1, dùng sigma_max; nếu > 0, dùng giá trị chỉ định
+		self.inference_sigma = sigma_max if inference_sigma < 0 else inference_sigma
 
 	def get_N(self):
 		"""Curriculum schedule: N tăng từ N_min đến N_max theo căn bậc hai.
@@ -219,16 +223,19 @@ class ConsistencyDiffusion(nn.Module):
 		return ct_loss, gc_loss
 
 	def p_sample(self, model, x_start, steps=None, sampling_noise=False):
-		"""Inference 1 bước (thay thế vòng lặp p_sample nhiều bước).
+		"""Inference CM: hỗ trợ 1-step hoặc multi-step.
 
-		Quy trình:
-		1. Thêm nhiễu tại mức sigma_max: x_T = x_0 + sigma_max * noise
-		2. Một bước khử nhiễu: x_0_hat = f_theta(x_T, sigma_max)
+		Multi-step (K bước):
+		1. Thêm nhiễu tại inference_sigma: x_T = x_0 + sigma * noise
+		2. Denoise: x_0_hat = f_theta(x_T, sigma)
+		3. Re-noise tại mức thấp hơn: x' = x_0_hat + sigma_next * noise'
+		4. Denoise lại: x_0_hat = f_theta(x', sigma_next)
+		5. Lặp cho đến bước cuối
 
 		Args:
 			model: ConsistencyDenoise
 			x_start: vector tương tác đầu vào [batch_size, num_items]
-			steps: giữ để tương thích API (không dùng, luôn 1 bước)
+			steps: giữ để tương thích API (không dùng)
 			sampling_noise: giữ để tương thích API (không dùng)
 
 		Returns:
@@ -236,15 +243,30 @@ class ConsistencyDiffusion(nn.Module):
 		"""
 		batch_size = x_start.size(0)
 		device = x_start.device
+		K = self.inference_steps
 
-		# Thêm nhiễu tại mức tối đa
-		noise = torch.randn_like(x_start)
-		sigma = torch.full((batch_size,), self.sigma_max, device=device)
-		x_T = x_start + sigma.unsqueeze(-1) * noise
+		# Tạo dãy sigma giảm dần cho multi-step
+		if K == 1:
+			sigmas = [self.inference_sigma]
+		else:
+			# Chia đều trên Karras schedule từ inference_sigma xuống sigma_min
+			ts = self.get_timesteps(K + 1).to(device)
+			# Lấy K mốc cao nhất (bỏ sigma_min ở cuối), đảo ngược thành giảm dần
+			sigmas = ts.flip(0)[:K].tolist()
 
-		# Một bước khử nhiễu duy nhất
 		with torch.no_grad():
-			x_0_hat = model(x_T, sigma, mess_dropout=False)
+			# Bước đầu: thêm nhiễu và denoise
+			noise = torch.randn_like(x_start)
+			sigma_curr = torch.full((batch_size,), sigmas[0], device=device)
+			x_t = x_start + sigma_curr.unsqueeze(-1) * noise
+			x_0_hat = model(x_t, sigma_curr, mess_dropout=False)
+
+			# Các bước tiếp: re-noise ở mức thấp hơn rồi denoise lại
+			for i in range(1, K):
+				noise = torch.randn_like(x_start)
+				sigma_next = torch.full((batch_size,), sigmas[i], device=device)
+				x_t = x_0_hat + sigma_next.unsqueeze(-1) * noise
+				x_0_hat = model(x_t, sigma_next, mess_dropout=False)
 
 		return x_0_hat
 

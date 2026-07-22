@@ -44,5 +44,7 @@ def ParseArgs():
 	parser.add_argument('--cm_N_max', type=int, default=80, help='final discretization steps')
 	parser.add_argument('--cm_loss_type', type=str, default='pseudo_huber', help='pseudo_huber / l2 / l1')
 	parser.add_argument('--ema_decay', type=float, default=0.999, help='EMA decay rate for target network')
+	parser.add_argument('--cm_inference_steps', type=int, default=1, help='CM inference steps (1=fastest, 2-3=better quality)')
+	parser.add_argument('--cm_inference_sigma', type=float, default=-1, help='inference noise level (-1=use cm_sigma_max)')
 	return parser.parse_args()
 args = ParseArgs()

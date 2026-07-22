@@ -85,7 +85,9 @@ class Coach:
 				sigma_min=args.cm_sigma_min, sigma_max=args.cm_sigma_max,
 				N_min=args.cm_N_min, N_max=args.cm_N_max,
 				total_training_steps=total_cm_steps,
-				loss_type=args.cm_loss_type
+				loss_type=args.cm_loss_type,
+				inference_steps=args.cm_inference_steps,
+				inference_sigma=args.cm_inference_sigma
 			).cuda()
 
 			self.denoise_model_image = ConsistencyDenoise(
